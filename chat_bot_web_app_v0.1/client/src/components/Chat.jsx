@@ -1,78 +1,157 @@
-import { useState } from "react";
+import { useState,useEffect,useRef } from "react";
 import api from "../api";
-import ReactMarkdown from 'react-markdown';
-
+import ReactMarkdown from "react-markdown";
+import "../styles/Chat.css"; // import the css file
 
 function Chat() {
     const ROUTE = "";
-    const [messages, setMessages] = useState([]); // has a role ( choosing between user and bot messages) and the content of each one , array of objects storing messages
-    const [message, setMessage] = useState("");   // sets the message from the input to a variable 
-    const [loading, setLoading] = useState(false);    //handles loading
+    const [messages, setMessages] = useState([]);
+    const [message, setMessage] = useState("");
+    const [loading, setLoading] = useState(false);
+    const messagesEndRef = useRef(null);
 
-    const sendMessage = async (e) => {
+  // Scroll to bottom when messages change
+    useEffect(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, [messages]);
+
+
+    useEffect (()=>{
+        getMessages()
+    },[])
+
+
+    const storeMessages = async(data) =>{
+        const res = await api.post("messages",{messages:data});
+        console.log(res);
+    }
+
+
+
+
+   const getMessages = async () => {
+        try {
+            const res = await api.post("getMessages");
+
+            console.log(res);
+            // res.data.reply is already an array of message objects, e.g. [{role:..., content:...}, ...]
+            setMessages(res.data.reply);
+
+            
+        }
+        catch (err) {
+            console.error("Error loading messages:", err);
+        }
+};
+
+
+
+
+
+
+
+   const sendMessage = async (e) => {
         e.preventDefault();
         if (!message.trim()) return;
 
         setLoading(true);
 
         try {
-            // Add user message
-            setMessages((prev) => [...prev, { role: "user", content: message }]); // adds new messages to previous ones
+            // Optimistically add user message
+            const updatedMessages = [...messages, { role: "user", content: message }];
+            setMessages(updatedMessages);
 
-            const res = await api.post(ROUTE, { message });
-            const reply = res.data.reply || "No response"; // standard answer adaptable in backend (reply from server = bot message)
-            console.log(res.data)
-            // Add bot reply
-            setMessages((prev) => [...prev, { role: "bot", content: reply }]);    // adds new messages to previous ones
-            // console.log(messages)
+            // Send full messages array including new user message
+            const res = await api.post(ROUTE, { messages: updatedMessages });
+
+            const reply = res.data.reply?.trim() || "No response";
+
+            // If assistant replied, add it to state + save
+            if (reply !== "No response") {
+                const finalMessages = [...updatedMessages, { role: "assistant", content: reply }];
+                setMessages(finalMessages);
+
+                // ✅ Store messages after assistant reply is added
+                storeMessages(finalMessages);
+            } else {
+                // Still store user input alone (if needed)
+                storeMessages(updatedMessages);
+            }
+
         } catch (err) {
-            console.error(err);
+            console.error("Error sending message:", err);
         } finally {
             setMessage("");
             setLoading(false);
         }
 
-    };
-
-
-
+        };
 
 
     return (
         <>
-        <div
-            className="chat-box border rounded p-3 my-3"
-            style={{ height: "800px", overflowY: "auto", backgroundColor: "#f8f9fa" }}
-        >
-            <div className="d-flex flex-column gap-2">
-            {messages.map((msg, idx) => (
-                <div
-                key={idx}
-                className={`rounded p-2 ${msg.role === "user"
-                    ? "bg-primary text-white align-self-end"    //if its a user its rendered right in the screen
-                    : "bg-light align-self-start"}`}    //if not its left 
-                >
-                <ReactMarkdown>{msg.content.replace(/\\n/g, "\n")}</ReactMarkdown>
-                
+            <div className="chat-box">
+                <div className="messages-container">
+                {messages.map((msg, idx) => (
+                    <div
+                    key={idx}
+                    className={`message-row ${
+                        msg.role === "user" ? "justify-end" : "justify-start"
+                    }`}
+                    >
+                    <div
+                        className={`message-bubble ${
+                        msg.role === "user" ? "user" : "bot"
+                        }`}
+                    >
+                        {/* <div className="icon-circle">
+                        <i
+                            className={`bi ${
+                            msg.role === "user" ? "bi-person" : "bi-robot"
+                            } text-dark icon`}
+                        ></i>
+                        </div> */}
+                        <div className="message-content">
+                            <ReactMarkdown
+                                components={{
+                                p: (props) => <p {...props} className="mb-0" />,
+                                }}
+                            >
+                                {msg.content.replace(/\\n/g, "\n").trim()}
+                            </ReactMarkdown>
+                            {/* {msg.content} */}
+                        </div>
+                    </div>
+                    </div>
+                ))}
                 </div>
-            ))}
-            </div>
-        </div>
+                    {loading && (
+                        <div className="message-row justify-start">
+                            <div className="message-bubble bot spinner-bubble">
+                            <div className="spinner"></div>
+                        </div>
+                </div>
+                )}
+                <div ref={messagesEndRef} />
+                </div>
+            
 
-        <form className="d-flex gap-2" onSubmit={sendMessage}>
-            <input
-            type="text"
-            className="form-control"
-            placeholder="Type your message..."
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
-            disabled={loading}
-            />
-            <button type="submit" className="btn btn-primary" disabled={loading}>
+            {/* <button onClick={() => document.body.classList.toggle("dark")}>Toggle Dark Mode</button> */}
+
+
+            <form className="message-form" onSubmit={sendMessage}>
+                <input
+                type="text"
+                className="form-control"
+                placeholder="Type your message..."
+                value={message}
+                onChange={(e) => setMessage(e.target.value)}
+                disabled={loading}
+                />
+                <button type="submit" className="btn btn-primary" disabled={loading}>
                 {loading ? "Sending..." : "Send"}
-            </button>
-        </form>
-
+                </button>
+            </form>
         </>
     );
 }
